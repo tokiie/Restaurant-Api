@@ -40,6 +40,17 @@ pub struct PartialItem {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct PartialItemReturn {
+    pub id: Uuid,
+    pub tables_id: Uuid,
+    pub menu_id: Uuid,
+    pub quantity: i32,
+    pub delivered_quantity: i32,
+    pub created_at: NaiveDateTime,
+    pub prep_time: i32
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Menu {
     pub id: Uuid,
     pub name: String,

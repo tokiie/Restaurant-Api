@@ -3,7 +3,7 @@ use sqlx::{Error, PgPool};
 use uuid::Uuid;
 // use chrono::Utc;
 
-use crate::{models::restaurant_models::{PartialItem, Items}, models::route_models::{FilterParams, Pagination}};
+use crate::models::{restaurant_models::{PartialItem, PartialItemReturn}, route_models::{FilterParams, Pagination}};
 
 pub struct Database {
     pub pool: PgPool,
@@ -31,6 +31,8 @@ pub struct BulkUpdateItemRequest {
     pub items: Vec<UpdateItemRequest>,
 }
 
+const MAX_ITEMS_LIMIT: usize = 100;
+
 impl Database {
     pub async fn new(database_url: &str) -> Result<Self, sqlx::Error> {
         let pool = PgPool::connect(database_url).await?;
@@ -42,15 +44,23 @@ impl Database {
         tables_id: Uuid,
         pagination: Pagination,
         filters: FilterParams,
-    ) -> Result<Vec<Items>, sqlx::Error> {
+    ) -> Result<Vec<PartialItemReturn>, sqlx::Error> {
         let limit = pagination.limit.unwrap_or(10);
         let offset = pagination.offset.unwrap_or(0);
 
         let items = sqlx::query_as!(
-            Items,
+            PartialItemReturn,
             r#"
-            SELECT *
-            FROM Items
+            SELECT
+                items.id,
+                items.tables_id,
+                items.menu_id,
+                items.quantity,
+                items.delivered_quantity,
+                items.created_at,
+                Menu.prepTime as prep_time
+            FROM items
+            LEFT JOIN Menu on menu_id = Menu.id
             WHERE tables_id = $1
               AND ($2::uuid IS NULL OR menu_id = $2)
               AND quantity > delivered_quantity
@@ -67,10 +77,14 @@ impl Database {
         Ok(items)
     }
 
-    pub async fn create_items(&self, tables_id: Uuid, new_items: Vec<NewItemRequest>) -> Result<Vec<PartialItem>, Error> {
+    pub async fn create_items(&self, tables_id: Uuid, new_items: Vec<NewItemRequest>) -> Result<Vec<PartialItem>, anyhow::Error> {
         let mut query = String::from("INSERT INTO items (id, tables_id, menu_id, quantity, delivered_quantity) VALUES ");
         let total_items = new_items.len();
         let mut placeholders = vec![];
+
+        if total_items > MAX_ITEMS_LIMIT {
+            return Err(anyhow::anyhow!("The number of items exceeds the limit of {}", MAX_ITEMS_LIMIT));
+        }
 
         for i in 0..total_items {
             let start = i * 5 + 1;
@@ -134,18 +148,21 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_item(&self, tables_id: Uuid, item_id: Uuid) -> Result<PartialItem, Error> {
+    pub async fn get_item(&self, tables_id: Uuid, item_id: Uuid) -> Result<PartialItemReturn, Error> {
         let item = sqlx::query_as!(
-            PartialItem,
+            PartialItemReturn,
             r#"
             SELECT
-                id,
-                tables_id,
-                menu_id,
-                quantity,
-                delivered_quantity
+                items.id,
+                items.tables_id,
+                items.menu_id,
+                items.quantity,
+                items.delivered_quantity,
+                items.created_at,
+                Menu.prepTime as prep_time
             FROM items
-            WHERE tables_id = $1 AND id = $2
+            LEFT JOIN Menu on menu_id = Menu.id
+            WHERE items.tables_id = $1 AND items.id = $2
             "#,
             tables_id,
             item_id
@@ -190,9 +207,12 @@ impl Database {
         Ok(())
     }
 
-    pub async fn update_items(&self, items: Vec<UpdateItemRequest>) -> Result<usize, Error> {
+
+    pub async fn update_items(&self, items: Vec<UpdateItemRequest>) -> Result<usize, anyhow::Error> {
         if items.is_empty() {
             return Ok(0);
+        } else if items.len() > MAX_ITEMS_LIMIT {
+            return Err(anyhow::anyhow!("The number of items exceeds the limit of {}", MAX_ITEMS_LIMIT));
         }
 
         let mut cases_quantity = String::from("quantity = CASE ");
@@ -231,7 +251,7 @@ impl Database {
 
         let result = query_args.execute(&self.pool).await.map_err(|err| {
             eprintln!("Error updating items: {}", err);
-            err
+            anyhow::anyhow!(err)
         })?;
 
         Ok(result.rows_affected() as usize)
