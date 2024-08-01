@@ -1,6 +1,8 @@
 use chrono::NaiveDateTime;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
+use rust_decimal::Decimal;
+
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Device {
@@ -54,6 +56,6 @@ pub struct PartialItemReturn {
 pub struct Menu {
     pub id: Uuid,
     pub name: String,
-    pub price: f64,
+    pub price: Decimal,
     pub prep_time: i32,
 }
